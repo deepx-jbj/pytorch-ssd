@@ -24,19 +24,21 @@ from vision.ssd.config import mobilenetv1_ssd_config
 from vision.ssd.config import squeezenet_ssd_config
 from vision.ssd.data_preprocessing import TrainAugmentation, TestTransform
 
+# python train_ssd.py --batch_size 32 --num_epochs 200 --scheduler cosine --lr 0.01 --t_max 200 --validation_epochs 5
+
 parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Training With Pytorch')
 
 parser.add_argument("--dataset_type", default="voc", type=str,
                     help='Specify dataset type. Currently support voc and open_images.')
 
-parser.add_argument('--datasets', nargs='+', help='Dataset directory path')
-parser.add_argument('--validation_dataset', help='Dataset directory path')
+parser.add_argument('--datasets', nargs='+', default="False", help='Dataset directory path')
+parser.add_argument('--validation_dataset', default="/mnt/datasets/PascalVOC/VOCdevkit/VOC2007", help='Dataset directory path')
 parser.add_argument('--balance_data', action='store_true',
                     help="Balance training data by down-sampling more frequent labels.")
 
 
-parser.add_argument('--net', default="vgg16-ssd",
+parser.add_argument('--net', default="mb2-ssd-lite",
                     help="The network architecture, it can be mb1-ssd, mb1-lite-ssd, mb2-ssd-lite, mb3-large-ssd-lite, mb3-small-ssd-lite or vgg16-ssd.")
 parser.add_argument('--freeze_base_net', action='store_true',
                     help="Freeze base net layers.")
@@ -62,10 +64,10 @@ parser.add_argument('--extra_layers_lr', default=None, type=float,
 
 
 # Params for loading pretrained basenet or checkpoints.
-parser.add_argument('--base_net',
+parser.add_argument('--base_net', default="models/mb2-imagenet-71_8.pth",
                     help='Pretrained base model')
 parser.add_argument('--pretrained_ssd', help='Pre-trained base model')
-parser.add_argument('--resume', default=None, type=str,
+parser.add_argument('--resume', default="models/mb2-ssd-lite-mp-0_686.pth", type=str,
                     help='Checkpoint state_dict file to resume training from')
 
 # Scheduler
@@ -94,13 +96,15 @@ parser.add_argument('--debug_steps', default=100, type=int,
 parser.add_argument('--use_cuda', default=True, type=str2bool,
                     help='Use CUDA to train model')
 
-parser.add_argument('--checkpoint_folder', default='models/',
+parser.add_argument('--checkpoint_folder', default='checkpoints/',
                     help='Directory for saving checkpoint models')
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 args = parser.parse_args()
+args.datasets = ['/mnt/datasets/PascalVOC/VOCdevkit/VOC2007', '/mnt/datasets/PascalVOC/VOCdevkit/VOC2012']
+
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() and args.use_cuda else "cpu")
 
 if args.use_cuda and torch.cuda.is_available():
@@ -246,6 +250,11 @@ if __name__ == '__main__':
                             shuffle=False)
     logging.info("Build network.")
     net = create_net(num_classes)
+    
+    # # load pre-trained FP32 weights
+    # net.load("models/mb2-ssd-lite-mp-0_686.pth")
+    # net = net.to(DEVICE)
+    
     min_loss = -10000.0
     last_epoch = -1
 
@@ -288,7 +297,8 @@ if __name__ == '__main__':
     timer.start("Load Model")
     if args.resume:
         logging.info(f"Resume from the model {args.resume}")
-        net.load(args.resume)
+        # models/mb2-ssd-lite-mp-0_686.pth: FP32 model
+        net.load(args.resume) 
     elif args.base_net:
         logging.info(f"Init from base net {args.base_net}")
         net.init_from_base_net(args.base_net)

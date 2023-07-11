@@ -15,6 +15,7 @@ import sys
 from vision.ssd.mobilenet_v2_ssd_lite import create_mobilenetv2_ssd_lite, create_mobilenetv2_ssd_lite_predictor
 from vision.ssd.mobilenetv3_ssd_lite import create_mobilenetv3_large_ssd_lite, create_mobilenetv3_small_ssd_lite
 
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser(description="SSD Evaluation on VOC Dataset.")
 parser.add_argument('--net', default="vgg16-ssd",
@@ -23,8 +24,8 @@ parser.add_argument("--trained_model", type=str)
 
 parser.add_argument("--dataset_type", default="voc", type=str,
                     help='Specify dataset type. Currently support voc and open_images.')
-parser.add_argument("--dataset", type=str, help="The root directory of the VOC dataset or Open Images dataset.")
-parser.add_argument("--label_file", type=str, help="The label file path.")
+parser.add_argument("--dataset", type=str, default="/mnt/datasets/PascalVOC/VOCdevkit/VOC2007", help="The root directory of the VOC dataset or Open Images dataset.")
+# parser.add_argument("--label_file", type=str, help="The label file path.")
 parser.add_argument("--use_cuda", type=str2bool, default=True)
 parser.add_argument("--use_2007_metric", type=str2bool, default=True)
 parser.add_argument("--nms_method", type=str, default="hard")
@@ -35,7 +36,7 @@ parser.add_argument('--mb2_width_mult', default=1.0, type=float,
 args = parser.parse_args()
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() and args.use_cuda else "cpu")
 
-
+# python eval_ssd.py --net mb2-ssd-lite --trained_model models/mb2-ssd-lite-mp-0_686.pth
 def group_annotation_by_class(dataset):
     true_case_stat = {}
     all_gt_boxes = {}
@@ -124,7 +125,13 @@ if __name__ == '__main__':
     eval_path = pathlib.Path(args.eval_dir)
     eval_path.mkdir(exist_ok=True)
     timer = Timer()
-    class_names = [name.strip() for name in open(args.label_file).readlines()]
+    # class_names = [name.strip() for name in open(args.label_file).readlines()]
+    class_names = ['BACKGROUND',
+            'aeroplane', 'bicycle', 'bird', 'boat',
+            'bottle', 'bus', 'car', 'cat', 'chair',
+            'cow', 'diningtable', 'dog', 'horse',
+            'motorbike', 'person', 'pottedplant',
+            'sheep', 'sofa', 'train', 'tvmonitor']
 
     if args.dataset_type == "voc":
         dataset = VOCDataset(args.dataset, is_test=True)
@@ -171,14 +178,11 @@ if __name__ == '__main__':
         sys.exit(1)
 
     results = []
-    for i in range(len(dataset)):
-        print("process image", i)
+    for i in tqdm(range(len(dataset))):
         timer.start("Load Image")
         image = dataset.get_image(i)
-        print("Load Image: {:4f} seconds.".format(timer.end("Load Image")))
         timer.start("Predict")
         boxes, labels, probs = predictor.predict(image)
-        print("Prediction: {:4f} seconds.".format(timer.end("Predict")))
         indexes = torch.ones(labels.size(0), 1, dtype=torch.float32) * i
         results.append(torch.cat([
             indexes.reshape(-1, 1),

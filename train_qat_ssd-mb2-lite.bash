@@ -1,0 +1,1 @@
+python train_ssd.py --batch_size 32 --num_epochs 200 --scheduler cosine --lr 0.01 --t_max 200
