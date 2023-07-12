@@ -16,6 +16,9 @@ from vision.ssd.mobilenet_v2_ssd_lite import create_mobilenetv2_ssd_lite, create
 from vision.ssd.mobilenetv3_ssd_lite import create_mobilenetv3_large_ssd_lite, create_mobilenetv3_small_ssd_lite
 
 from tqdm import tqdm
+from vision.ssd.config import vgg_ssd_config
+from vision.ssd.config import mobilenetv1_ssd_config
+from vision.ssd.config import squeezenet_ssd_config
 
 parser = argparse.ArgumentParser(description="SSD Evaluation on VOC Dataset.")
 parser.add_argument('--net', default="vgg16-ssd",
@@ -34,9 +37,10 @@ parser.add_argument("--eval_dir", default="eval_results", type=str, help="The di
 parser.add_argument('--mb2_width_mult', default=1.0, type=float,
                     help='Width Multiplifier for MobilenetV2')
 args = parser.parse_args()
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() and args.use_cuda else "cpu")
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() and args.use_cuda else "cpu")
 
 # python eval_ssd.py --net mb2-ssd-lite --trained_model models/mb2-ssd-lite-mp-0_686.pth
+# python eval_ssd.py --net mb2-ssd-lite --trained_model qlite.onnx
 def group_annotation_by_class(dataset):
     true_case_stat = {}
     all_gt_boxes = {}
@@ -159,8 +163,12 @@ if __name__ == '__main__':
         sys.exit(1)
 
     timer.start("Load Model")
-    net.load(args.trained_model)
-    net = net.to(DEVICE)
+    if args.trained_model[-5:] == ".onnx":
+        import onnx
+        net = onnx.load(args.trained_model)
+    else:
+        net.load(args.trained_model)
+        net = net.to(DEVICE)
     print(f'It took {timer.end("Load Model")} seconds to load the model.')
     if args.net == 'vgg16-ssd':
         predictor = create_vgg_ssd_predictor(net, nms_method=args.nms_method, device=DEVICE)

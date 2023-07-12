@@ -6,6 +6,9 @@ import torch.nn.functional as F
 
 from ..utils import box_utils
 from collections import namedtuple
+
+from dl_adquantizer import DxCat, DxView, DxPermute
+
 GraphPath = namedtuple("GraphPath", ['s0', 'name', 's1'])  #
 
 
@@ -36,8 +39,21 @@ class SSD(nn.Module):
         if is_test:
             self.config = config
             self.priors = config.priors.to(self.device)
+        
+        self.identity = nn.Identity()
+        
+        self.dx_cat1 = DxCat(dim=1)
+        self.dx_cat2 = DxCat(dim=1)
+        self.dx_permutes1 = nn.ModuleList([DxPermute() for i in range(len(classification_headers))])
+        self.dx_views1 = nn.ModuleList([DxView() for i in range(len(classification_headers))])
+        
+        self.dx_permutes2 = nn.ModuleList([DxPermute() for i in range(len(classification_headers))])
+        self.dx_views2 = nn.ModuleList([DxView() for i in range(len(classification_headers))])
+        
             
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        x = self.identity(x)
+        
         confidences = []
         locations = []
         start_layer_index = 0
@@ -84,8 +100,10 @@ class SSD(nn.Module):
             confidences.append(confidence)
             locations.append(location)
 
-        confidences = torch.cat(confidences, 1)
-        locations = torch.cat(locations, 1)
+        # confidences = torch.cat(confidences, 1)
+        # locations = torch.cat(locations, 1)
+        confidences = self.dx_cat1(*confidences)
+        locations = self.dx_cat2(*locations)
         
         if self.is_test:
             confidences = F.softmax(confidences, dim=2)
@@ -99,12 +117,16 @@ class SSD(nn.Module):
 
     def compute_header(self, i, x):
         confidence = self.classification_headers[i](x)
-        confidence = confidence.permute(0, 2, 3, 1).contiguous()
-        confidence = confidence.view(confidence.size(0), -1, self.num_classes)
+        # confidence = confidence.permute(0, 2, 3, 1).contiguous()
+        confidence = self.dx_permutes1[i](confidence, (0, 2, 3, 1)).contiguous()
+        # confidence = confidence.view(confidence.size(0), -1, self.num_classes)
+        confidence = self.dx_views1[i](confidence, (confidence.size(0), -1, self.num_classes))
 
         location = self.regression_headers[i](x)
-        location = location.permute(0, 2, 3, 1).contiguous()
-        location = location.view(location.size(0), -1, 4)
+        # location = location.permute(0, 2, 3, 1).contiguous()
+        location = self.dx_permutes2[i](location, (0, 2, 3, 1)).contiguous()
+        # location = location.view(location.size(0), -1, 4)
+        location = self.dx_views2[i](location, (location.size(0), -1, 4))
 
         return confidence, location
 

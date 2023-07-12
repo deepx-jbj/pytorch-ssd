@@ -5,6 +5,7 @@ import math
 # In this version, Relu6 is replaced with Relu to make it ONNX compatible.
 # BatchNorm Layer is optional to make it easy do batch norm confusion.
 
+from dl_adquantizer.converter.dx_modules import DxAdd, DxMean
 
 def conv_bn(inp, oup, stride, use_batch_norm=True, onnx_compatible=False):
     ReLU = nn.ReLU if onnx_compatible else nn.ReLU6
@@ -38,7 +39,7 @@ def conv_1x1_bn(inp, oup, use_batch_norm=True, onnx_compatible=False):
 
 
 class InvertedResidual(nn.Module):
-    def __init__(self, inp, oup, stride, expand_ratio, use_batch_norm=True, onnx_compatible=False):
+    def __init__(self, inp, oup, stride, expand_ratio, use_batch_norm=True, onnx_compatible=True):
         super(InvertedResidual, self).__init__()
         ReLU = nn.ReLU if onnx_compatible else nn.ReLU6
 
@@ -93,17 +94,19 @@ class InvertedResidual(nn.Module):
                     # pw-linear
                     nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
                 )
+        self.dx_add = DxAdd()
 
     def forward(self, x):
         if self.use_res_connect:
-            return x + self.conv(x)
+            return self.dx_add(x, self.conv(x))
+            # return x + self.conv(x)
         else:
             return self.conv(x)
 
 
 class MobileNetV2(nn.Module):
     def __init__(self, n_class=1000, input_size=224, width_mult=1., dropout_ratio=0.2,
-                 use_batch_norm=True, onnx_compatible=False):
+                 use_batch_norm=True, onnx_compatible=True):
         super(MobileNetV2, self).__init__()
         block = InvertedResidual
         input_channel = 32
@@ -150,10 +153,15 @@ class MobileNetV2(nn.Module):
         )
 
         self._initialize_weights()
+        
+        self.dx_mean1 = DxMean()
+        self.dx_mean2 = DxMean()
 
     def forward(self, x):
         x = self.features(x)
-        x = x.mean(3).mean(2)
+        # x = x.mean(3).mean(2)
+        x = self.dx_mean1(x, 3)
+        x = self.dx_mean1(x, 2)
         x = self.classifier(x)
         return x
 

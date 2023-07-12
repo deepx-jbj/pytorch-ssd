@@ -24,6 +24,8 @@ from vision.ssd.config import mobilenetv1_ssd_config
 from vision.ssd.config import squeezenet_ssd_config
 from vision.ssd.data_preprocessing import TrainAugmentation, TestTransform
 
+from dl_adquantizer.qmaster import DXQmasterManager
+
 # python train_ssd.py --batch_size 32 --num_epochs 200 --scheduler cosine --lr 0.01 --t_max 200 --validation_epochs 5
 
 parser = argparse.ArgumentParser(
@@ -307,10 +309,44 @@ if __name__ == '__main__':
         net.init_from_pretrained_ssd(args.pretrained_ssd)
     logging.info(f'Took {timer.end("Load Model"):.2f} seconds to load the model.')
 
-    net.to(DEVICE)
-
     criterion = MultiboxLoss(config.priors, iou_threshold=0.5, neg_pos_ratio=3,
                              center_variance=0.1, size_variance=0.2, device=DEVICE)
+    
+    
+    # QMaster
+    manager = DXQmasterManager(net, torch.randn(1, 3, config.image_size, config.image_size), print_graph=True)
+    manager.prepare_model_for_calib()
+    # calibration
+    CAL_NUM = 100
+    
+    cnt = 0
+    for i, data in enumerate(val_loader):
+        images, boxes, labels = data
+        batch = len(images)
+        for j in range(batch):
+            one_img = images[j:j+1]
+            net(one_img)
+            cnt += 1
+            if cnt % 20 == 0:
+                print(f"Calibration count: {cnt}")
+                # print(f"img shape: {images.shape}") # torch.Size([32, 3, 300, 300])
+            if cnt == 100:
+                break
+        if cnt == 100:
+            break
+    print("Calibration end")
+    # change model into train mode
+    manager.prepare_model_for_train()
+    
+    # # export qlite model
+    # save_path="qlite.onnx"
+    # manager.compile(save_path=save_path)
+    # print(f"exported {save_path}")
+    # exit()
+    
+    net.to(DEVICE)
+    
+    
     optimizer = torch.optim.SGD(params, lr=args.lr, momentum=args.momentum,
                                 weight_decay=args.weight_decay)
     logging.info(f"Learning rate: {args.lr}, Base net learning rate: {base_net_lr}, "
@@ -346,3 +382,7 @@ if __name__ == '__main__':
             model_path = os.path.join(args.checkpoint_folder, f"{args.net}-Epoch-{epoch}-Loss-{val_loss}.pth")
             net.save(model_path)
             logging.info(f"Saved model {model_path}")
+    
+    save_path="qmaster_decoded.onnx"
+    manager.compile(save_path=save_path)
+    print(f"exported {save_path}")

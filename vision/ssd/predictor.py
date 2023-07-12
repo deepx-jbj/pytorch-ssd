@@ -4,16 +4,21 @@ from ..utils import box_utils
 from .data_preprocessing import PredictionTransform
 from ..utils.misc import Timer
 
+from dx_com.onnx.util import proto2session
+import onnx
+import torch.nn.functional as F
+
 
 class Predictor:
     def __init__(self, net, size, mean=0.0, std=1.0, nms_method=None,
-                 iou_threshold=0.45, filter_threshold=0.01, candidate_size=200, sigma=0.5, device=None):
+                 iou_threshold=0.45, filter_threshold=0.01, candidate_size=200, sigma=0.5, device=None, config=None):
         self.net = net
         self.transform = PredictionTransform(size, mean, std)
         self.iou_threshold = iou_threshold
         self.filter_threshold = filter_threshold
         self.candidate_size = candidate_size
         self.nms_method = nms_method
+        self.config = config
 
         self.sigma = sigma
         if device:
@@ -21,8 +26,14 @@ class Predictor:
         else:
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        self.net.to(self.device)
-        self.net.eval()
+        if not isinstance(self.net, onnx.ModelProto):
+            self.net.to(self.device)
+            self.net.eval()
+        else:
+            if torch.cuda.is_available():
+                gpu_mode = True
+            self.session = proto2session(self.net, gpu_mode=gpu_mode)
+            self.input_names = [node.name for node in self.net.graph.input]
 
         self.timer = Timer()
 
@@ -32,9 +43,23 @@ class Predictor:
         image = self.transform(image)
         images = image.unsqueeze(0)
         images = images.to(self.device)
-        with torch.no_grad():
-            self.timer.start()
-            scores, boxes = self.net.forward(images)
+        self.timer.start()
+        if isinstance(self.net, onnx.ModelProto):
+            images = images.detach().cpu().numpy()
+            scores, locations = self.session.run(None, input_feed={self.input_names[0]:images})
+            scores = torch.tensor(scores)
+            locations = torch.tensor(locations)
+            
+            # test pre-processing
+            scores = F.softmax(scores, dim=2)
+            boxes = box_utils.convert_locations_to_boxes(
+                locations, self.config.priors, self.config.center_variance, self.config.size_variance
+            )
+            boxes = box_utils.center_form_to_corner_form(boxes)
+            
+        else:
+            with torch.no_grad():
+                scores, boxes = self.net.forward(images)
         boxes = boxes[0]
         scores = scores[0]
         if not prob_threshold:

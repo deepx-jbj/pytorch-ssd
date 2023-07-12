@@ -1,9 +1,11 @@
 .DS_Store
 .idea
 log
+
+# models and results
 models/
 checkpoints/
-
+*.onnx
 eval_results/
 
 # Pytorch Models
